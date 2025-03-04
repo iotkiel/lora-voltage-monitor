@@ -11,3 +11,8 @@ too be continue
 [Example Node 1 with Source Code](example-node1)
 
 "Arduino MKR WAN 1300" with LoRaWAN Chip, DC-DC Converter, 2 Resistors, DC-Jack and a DIY 12V Car-Energyplugadapter.
+
+
+## Interesting Links:
+
+[LoRaProMini Node](https://github.com/foorschtbar/LoRaProMini)
