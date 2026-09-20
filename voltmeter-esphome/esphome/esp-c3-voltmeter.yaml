@@ -1,0 +1,263 @@
+substitutions:
+  device_name: esp-c3-voltmeter
+  friendly_name: "ESP-C3 Voltmeter"
+  # Offset des sichtbaren 72x40-Bereichs im 128x64-Framebuffer des OLED.
+  # Kalibriert am Gerät: (28, 24). Herstellerangabe (13, 14) stimmte nicht.
+  oled_offset_x: "28"
+  oled_offset_y: "24"
+  # Kalibrierung: "true" zeichnet einen Rahmen um den 72x40-Bereich,
+  # damit der Offset exakt justiert werden kann. Danach wieder "false".
+  oled_frame: "false"
+  # Deep Sleep vor dem Flashen ein-/ausschalten ("true"/"false")
+  deep_sleep_enabled: "true"
+  # Schlafintervall in Minuten (zur Laufzeit per HA-Number aenderbar)
+  sleep_minutes: "10"
+  # Default-Akkutyp fuer die %-Kennlinie:
+  # 0 = Blei-Gel, 1 = AGM, 2 = LiFePO4 (4S), 3 = Li-Ion (3S)
+  battery_type_default: "0"
+
+esphome:
+  name: ${device_name}
+  friendly_name: ${friendly_name}
+  project:
+    name: fabia.esp-c3-voltmeter
+    version: "0.7.1"
+  on_boot:
+    priority: 600
+    then:
+      # Deep Sleep zunaechst verhindern, bis Daten an HA gesendet wurden
+      - deep_sleep.prevent: deep_sleep_control
+      # Intervall aus global anwenden (per HA-Number zur Laufzeit aenderbar)
+      - lambda: 'id(deep_sleep_control).set_sleep_duration((uint32_t)(id(sleep_interval_min) * 60 * 1000));'
+      - if:
+          condition:
+            lambda: 'return id(sleep_enabled);'
+          then:
+            - script.execute: sleep_fallback
+
+esp32:
+  board: esp32-c3-devkitm-1
+  variant: esp32c3
+  framework:
+    type: esp-idf
+
+# ESP32-C3: Log ueber nativen USB-Anschluss
+logger:
+  hardware_uart: USB_SERIAL_JTAG
+
+api:
+  on_client_connected:
+    then:
+      # Erst schlafen, wenn HA verbunden ist und Sensorwerte (1x/s)
+      # sicher uebertragen wurden
+      - if:
+          condition:
+            lambda: 'return id(sleep_enabled);'
+          then:
+            - delay: 5s
+            - deep_sleep.enter: deep_sleep_control
+
+  encryption:
+    key: !secret esp_c3_voltmeter__encryption_key
+
+ota:
+  - platform: esphome
+    encryption:
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  fast_connect: true
+  ap:
+    ssid: "${device_name}-fallback"
+
+captive_portal:
+
+globals:
+  # Flash-Default aus Substitution; zur Laufzeit per HA-Switch/-Number
+  # aenderbar. restore_value auf ESP32 = RTC-RAM -> ueberlebt
+  # Deep-Sleep-Zyklen, nur bei Stromtrennung Rueckfall auf Default
+  - id: sleep_enabled
+    type: bool
+    restore_value: yes
+    initial_value: "${deep_sleep_enabled}"
+  - id: sleep_interval_min
+    type: float
+    restore_value: yes
+    initial_value: "${sleep_minutes}"
+  # Aktiver Akkutyp (0-3), ueberlebt Sleep-Zyklen; Default = Substitution
+  - id: battery_type_idx
+    type: int
+    restore_value: yes
+    initial_value: "${battery_type_default}"
+
+deep_sleep:
+  id: deep_sleep_control
+  sleep_duration: ${sleep_minutes}min
+
+script:
+  # Fallback: spaetestens 60 s nach Boot schlafen, auch wenn HA
+  # nicht erreichbar ist (verhindert Dauer-Wachsein = Batterie leer)
+  - id: sleep_fallback
+    mode: single
+    then:
+      - delay: 60s
+      - deep_sleep.enter: deep_sleep_control
+
+switch:
+  # In HA schaltbar: Deep Sleep an/aus (switch.esp_c3_voltmeter_deep_sleep)
+  - platform: template
+    name: "Deep Sleep"
+    lambda: 'return id(sleep_enabled);'
+    turn_on_action:
+      then:
+        - globals.set: {id: sleep_enabled, value: "true"}
+        - deep_sleep.allow: deep_sleep_control
+        - script.execute: sleep_fallback
+    turn_off_action:
+      then:
+        - globals.set: {id: sleep_enabled, value: "false"}
+        - deep_sleep.prevent: deep_sleep_control
+        - script.stop: sleep_fallback
+
+number:
+  # Schlafintervall in Minuten, zur Laufzeit aus HA aenderbar
+  # (number.esp_c3_voltmeter_schlafintervall)
+  - platform: template
+    name: "Schlafintervall"
+    min_value: 1
+    max_value: 720
+    step: 1
+    unit_of_measurement: "min"
+    mode: box
+    lambda: 'return id(sleep_interval_min);'
+    set_action:
+      then:
+        - globals.set:
+            id: sleep_interval_min
+            value: !lambda 'return x;'
+        - lambda: 'id(deep_sleep_control).set_sleep_duration((uint32_t)(id(sleep_interval_min) * 60 * 1000));'
+
+# OLED + INA226 teilen sich den I2C-Bus
+i2c:
+  sda: GPIO5
+  scl: GPIO6
+  scan: true
+  frequency: 400kHz
+
+font:
+  - file: "gfonts://Roboto"
+    id: font_big
+    size: 18
+  - file: "gfonts://Roboto"
+    id: font_mid
+    size: 16
+  - file: "gfonts://Roboto"
+    id: font_small
+    size: 12
+
+display:
+  - platform: ssd1306_i2c
+    id: oled
+    model: SSD1306_128X64
+    address: 0x3C
+    update_interval: 1s
+    lambda: |-
+      // Sichtbarer Bereich: 72x40 px ab (oled_offset_x, oled_offset_y)
+      int x = ${oled_offset_x};
+      int y = ${oled_offset_y};
+      // Kalibrierungsrahmen (oled_frame = "true"): Rechteck muss auf
+      // allen vier Seiten sichtbar sein, sonst Offset nachjustieren
+      if (${oled_frame}) {
+        it.rectangle(x, y, 72, 40);
+      }
+      // Gross, zentriert: Batteriespannung vom INA226
+      it.printf(x + 36, y + 2, id(font_big), TextAlign::TOP_CENTER,
+                "%.2f V", id(ina_bus_voltage).state);
+      it.printf(x + 36, y + 23, id(font_mid), TextAlign::TOP_CENTER,
+                "%.0f %%", id(battery_level).state);
+
+sensor:
+  - platform: ina226
+    address: 0x40
+    # Shunt-Bestueckung des Moduls pruefen (u. a. R100 = 0.1 Ohm)
+    shunt_resistance: 0.1 ohm
+    max_current: 3.2A
+    update_interval: 1s
+    bus_voltage:
+      name: "Busspannung"
+      id: ina_bus_voltage
+      accuracy_decimals: 2
+      on_value:
+        then:
+          # Ladezustand aus Ruhespannungs-Kennlinie des gewaehlten
+          # Akkutyps berechnen (stueckweise linear interpoliert)
+          - sensor.template.publish:
+              id: battery_level
+              state: !lambda |-
+                static const float SOC[7]  = {0, 20, 40, 60, 80, 90, 100};
+                static const float GEL_V[7]  = {10.5, 11.7, 12.0, 12.2, 12.5, 12.7, 12.85};
+                static const float AGM_V[7]  = {10.8, 11.85, 12.15, 12.3, 12.6, 12.8, 13.0};
+                static const float LFP_V[7]  = {10.0, 12.0, 12.8, 13.0, 13.2, 13.4, 13.6};
+                static const float LIIO_V[7] = {9.0, 10.2, 10.8, 11.4, 12.0, 12.4, 12.6};
+                const float *vv = GEL_V;
+                switch (id(battery_type_idx)) {
+                  case 1: vv = AGM_V; break;
+                  case 2: vv = LFP_V; break;
+                  case 3: vv = LIIO_V; break;
+                }
+                if (x <= vv[0]) return 0.0f;
+                if (x >= vv[6]) return 100.0f;
+                for (int i = 0; i < 6; i++) {
+                  if (x < vv[i+1])
+                    return SOC[i] + (x - vv[i]) * (SOC[i+1] - SOC[i]) / (vv[i+1] - vv[i]);
+                }
+                return 0.0f;
+    shunt_voltage:
+      name: "Shunt-Spannung"
+      id: ina_shunt_voltage
+      accuracy_decimals: 4
+    current:
+      name: "Strom"
+      id: ina_current
+      accuracy_decimals: 3
+    power:
+      name: "Leistung"
+      id: ina_power
+      accuracy_decimals: 2
+
+  # Geschaetzter Ladezustand (wird bei jedem Busspannungs-Update
+  # per sensor.template.publish aus der Kennlinie des Akkutyps gefuellt).
+  # Achtung: nur bei Ruhespannung aussagekraeftig – unter Last sinkt,
+  # beim Laden steigt die Spannung. Bei LiFePO4 ist die Kennlinie in der
+  # Mitte sehr flach -> % dort nur grobe Naeherung.
+  - platform: template
+    name: "Batterieladung"
+    id: battery_level
+    unit_of_measurement: "%"
+    device_class: battery
+    accuracy_decimals: 0
+    update_interval: never
+
+select:
+  # Akkutyp in HA waehlbar (select.esp_c3_voltmeter_akkutyp)
+  - platform: template
+    name: "Akkutyp"
+    options:
+      - "Blei-Gel"
+      - "AGM"
+      - "LiFePO4 (4S)"
+      - "Li-Ion (3S)"
+    lambda: |-
+      const char* opts[] = {"Blei-Gel", "AGM", "LiFePO4 (4S)", "Li-Ion (3S)"};
+      return std::string(opts[id(battery_type_idx)]);
+    set_action:
+      then:
+        - globals.set:
+            id: battery_type_idx
+            value: !lambda |-
+              const char* opts[] = {"Blei-Gel", "AGM", "LiFePO4 (4S)", "Li-Ion (3S)"};
+              for (int i = 0; i < 4; i++) {
+                if (x == opts[i]) return i;
+              }
+              return 0;
