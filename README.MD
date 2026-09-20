@@ -4,7 +4,7 @@ Hello World,
 
 here will be starts the documentation for an open source LoRaWAN based Voltage Monitor Node.
 
-too be continue
+NEWS: we have now a ESP32 + WiFi Edition for Home Assistant and a LoRaWAN Version for The Things Network published!
 
 ## ExampleNode1
 
