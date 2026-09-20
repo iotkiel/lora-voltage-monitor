@@ -16,8 +16,8 @@ With a minimal amount of energy and a very long range this project can help you 
 
 Based on a Seeed Studio nRF52480 + SX1262 Header as LoRaWAN based Node with a very small energy amount and the INA226 Module
 
-<img src="voltmeter-lorawan/2026-09-20-lorawan-nrf52480-node.jpg" width="30%">
-<img src="voltmeter-lorawan/2026-09-20-lorawan-nrf52480-node-mobil.jpg" width="30%">
+<img src="voltmeter-lorawan/2026-09-20-lorawan-nrf52480-node.jpg" width="30%"><img src="voltmeter-lorawan/2026-09-20-lorawan-nrf52480-node-mobil.jpg" width="30%">
+
 
 ## LoRaWAN Node (Recycled Nucleon Base Node (untested!!!)
 no Picture yet
