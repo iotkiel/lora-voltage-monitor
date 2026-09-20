@@ -10,7 +10,10 @@ With a minimal amount of energy and a very long range this project can help you 
 "Arduino MKR WAN 1300" with LoRaWAN Chip, DC-DC Converter, 2 Resistors, DC-Jack and a DIY 12V Car-Energyplugadapter. It was the first prototype builded a few years ago, the idea was not followed anymore and so we make it now public. The Size of the Device is not so small and its not recommended to rebuild this version anymore!
 
 <img src="example-node1/2025-03-04-LoRa-VoltageNode12V.jpg" width="50%">
+
+
 ## LoRaWAN Node (nRF52840 Based)
+
 Based on a Seeed Studio nRF52480 + SX1262 Header as LoRaWAN based Node with a very small energy amount and the INA226 Module
 
 <img src="voltmeter-lorawan/2026-09-20-lorawan-nrf52480-node.jpg" width="50%">
